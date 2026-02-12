@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login — StyleMe</title>
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body data-page="login">
+  <main class="container narrow" style="margin-top:60px;">
+    <h2>Login</h2>
+    <form id="loginForm">
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required />
+      </div>
+      <button class="btn mt">Login</button>
+    </form>
+    <p class="muted">Don’t have an account? <a href="register.html">Register here</a></p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© 2025 StyleMe</div>
+  </footer>
+  <div class="toast" id="toast"></div>
+  <script src="assets/js/main.js?v=6"></script>
+
+</body>
+</html>
