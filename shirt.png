@@ -1,0 +1,357 @@
+/* ===========================
+   Stylmee - Main JS (Full, Clean)
+   ===========================
+   Structure:
+   /front-backend-styleme/front-end/assets/js/main.js
+   Back-end:
+   /front-backend-styleme/back-end/products_api.php
+   Auth:
+   /front-backend-styleme/back-end/auth/{login,register,logout,me}.php
+================================ */
+
+// ---------- Config ----------
+const API_BASE  = '/front-backend-styleme/back-end';
+const AUTH_BASE = '/front-backend-styleme/back-end/auth';
+const LS_KEY_CART  = 'STYLME_CART';
+const LS_KEY_ORDER = 'STYLME_LAST_ORDER';
+
+// ---------- Tiny helpers ----------
+const $  = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
+const fmt = n => Number(n||0).toFixed(2) + ' SAR';
+
+function toast(msg){
+  let t = $('#toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2000);
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+// ---------- Cart (localStorage) ----------
+function readCart(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY_CART) || '[]'); }
+  catch{ return []; }
+}
+function writeCart(items){
+  localStorage.setItem(LS_KEY_CART, JSON.stringify(items||[]));
+}
+function cartTotal(){
+  return readCart().reduce((sum, it)=> sum + (Number(it.price)||0)*(Number(it.qty)||0), 0);
+}
+function updateCartBadge(){
+  const b = $('#cartBadge');
+  if(!b) return;
+  const count = readCart().reduce((n, it)=> n + (Number(it.qty)||0), 0);
+  b.textContent = count;
+  b.style.display = count ? 'inline-block' : 'none';
+}
+function addToCartFromAPI({id, name, price}){
+  const cart = readCart();
+  const i = cart.findIndex(it => it.id === id);
+  if(i>=0) cart[i].qty++;
+  else cart.push({id, name, price: Number(price)||0, qty:1});
+  writeCart(cart); updateCartBadge(); toast('Added to cart ✅');
+}
+function changeQty(id, delta){
+  const cart = readCart();
+  const i = cart.findIndex(it => it.id === id);
+  if(i<0) return;
+  cart[i].qty += delta;
+  if(cart[i].qty <= 0) cart.splice(i,1);
+  writeCart(cart);
+  renderCart();
+  updateCartBadge();
+}
+
+// ---------- Products API ----------
+async function fetchProducts({ q = '', cat = 'all', page = 1, limit = 12 } = {}){
+  const params = new URLSearchParams({ q, cat, page, limit });
+  const url = `${API_BASE}/products_api.php?` + params.toString();
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('Failed to load products');
+  return res.json(); // { items: [...] }
+}
+
+// ---------- Render: Products ----------
+async function renderProducts(){
+  const grid = $('#grid');
+  const resultCount = $('#resultCount');
+  if(!grid) return;
+
+  const url = new URL(location.href);
+  const q = url.searchParams.get('q') || '';
+  const cat = window.currentCat || 'all';
+
+  try{
+    const data = await fetchProducts({ q, cat, page:1, limit:12 });
+    const items = data.items || [];
+
+    resultCount && (resultCount.textContent = `${items.length} items`);
+
+    grid.innerHTML = items.map(p=>{
+      const raw  = (p.image||'').trim();
+      const img  = '/' + raw.replace(/^\/+/, '');
+      const name = escapeHtml(p.name || '');
+      const desc = escapeHtml(p.description || '');
+      const price= Number(p.price||0).toFixed(2);
+      const cat  = escapeHtml(p.category || '');
+      const color= escapeHtml(p.color || '—');
+      const size = escapeHtml(p.size  || '—');
+
+      return `
+        <article class="card">
+          <div class="thumb">
+            ${
+              raw
+              ? `<img src="${img}" alt="${name}"
+                     onerror="this.src='/front-backend-styleme/front-end/assets/imgs/placeholder.jpg'">`
+              : `<span>${cat}</span>`
+            }
+          </div>
+          <div class="body">
+            <h3 class="title">${name}</h3>
+            <p class="desc">${desc}</p>
+            <div class="row">
+              <div>
+                <div class="price">${price} SAR</div>
+                <div class="muted">Color: ${color} · Size: ${size}</div>
+              </div>
+              <button class="btn" data-add="${p.id}" data-name="${name}" data-price="${p.price}">Add to cart</button>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    // Add-to-cart (delegation)
+    grid.onclick = (e)=>{
+      const btn = e.target.closest('[data-add]');
+      if(!btn) return;
+      addToCartFromAPI({ id:+btn.dataset.add, name:btn.dataset.name, price:+btn.dataset.price });
+    };
+
+  }catch(err){
+    console.error(err);
+    grid.innerHTML = `<p class="muted">❌ Could not load products. Try again.</p>`;
+  }
+
+  updateCartBadge();
+}
+
+// ---------- Filters (chips) ----------
+$('#filters')?.addEventListener('click', (e)=>{
+  const btn = e.target.closest('[data-cat]'); if(!btn) return;
+  $$('#filters .chip').forEach(c=>c.classList.remove('active'));
+  btn.classList.add('active');
+  window.currentCat = btn.dataset.cat;
+  renderProducts();
+});
+
+// ---------- Cart Page ----------
+function renderCart(){
+  const list = $('#cartList');
+  if(!list) return;
+
+  const items = readCart();
+  if(!items.length){
+    list.innerHTML = `<p class="muted">No items in cart.</p>`;
+  }else{
+    list.innerHTML = items.map(it=>`
+      <div class="cart-item">
+        <div style="background:#f3f4f6; border:1px solid var(--border); border-radius:8px; width:72px; height:72px"></div>
+        <div>
+          <strong>${escapeHtml(it.name)}</strong>
+          <div class="row gap sm mt">
+            <div class="qty">
+              <button data-qty="minus" data-id="${it.id}">−</button>
+              <span>${it.qty}</span>
+              <button data-qty="plus" data-id="${it.id}">+</button>
+            </div>
+            <button class="btn ghost" data-remove="${it.id}">Remove</button>
+          </div>
+        </div>
+        <div><strong>${fmt((it.price||0)*(it.qty||0))}</strong></div>
+      </div>
+    `).join('');
+  }
+
+  const t = $('#cartTotal'); if(t) t.textContent = fmt(cartTotal());
+}
+
+// Qty +/- / remove (delegation)
+document.addEventListener('click', (e)=>{
+  const minus = e.target.closest('[data-qty="minus"]');
+  if(minus){ changeQty(+minus.dataset.id, -1); return; }
+
+  const plus = e.target.closest('[data-qty="plus"]');
+  if(plus){ changeQty(+plus.dataset.id, +1); return; }
+
+  const rm = e.target.closest('[data-remove]');
+  if(rm){
+    const id = +rm.dataset.remove;
+    const cart = readCart().filter(it => it.id !== id);
+    writeCart(cart); renderCart(); updateCartBadge();
+    toast('Removed from cart');
+  }
+});
+
+// Clear cart
+$('#clearCart')?.addEventListener('click', ()=>{
+  writeCart([]); renderCart(); updateCartBadge(); toast('Cart cleared');
+});
+
+// ---------- Checkout ----------
+function renderCheckout(){
+  const box = $('#checkoutSummary'); if(!box) return;
+  const items = readCart();
+
+  if(!items.length){
+    box.innerHTML = '<p class="muted">No items in cart.</p>';
+  }else{
+    box.innerHTML = items.map(it=>`
+      <div class="cart-item" style="grid-template-columns:56px 1fr auto">
+        <div style="background:#f3f4f6; border:1px solid var(--border); border-radius:8px; width:56px; height:56px"></div>
+        <div><strong>${escapeHtml(it.name)}</strong><div class="muted">× ${it.qty}</div></div>
+        <div><strong>${fmt((it.price||0)*(it.qty||0))}</strong></div>
+      </div>
+    `).join('');
+  }
+
+  const t = $('#checkoutTotal'); if(t) t.textContent = fmt(cartTotal());
+}
+
+// Submit checkout 
+$('#checkoutForm')?.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  if(!readCart().length){ toast('Your cart is empty'); return; }
+  const form = new FormData(e.target);
+  const order = {
+    id: Math.floor(100000 + Math.random()*900000),
+    at: new Date().toISOString(),
+    total: cartTotal(),
+    customer: Object.fromEntries(form.entries()),
+    items: readCart()
+  };
+  localStorage.setItem(LS_KEY_ORDER, JSON.stringify(order));
+  writeCart([]); updateCartBadge();
+  location.href = 'success.html';
+});
+
+// ---------- Success ----------
+function renderSuccess(){
+  const last = JSON.parse(localStorage.getItem(LS_KEY_ORDER) || 'null');
+  const el = $('#orderId'); if(el) el.textContent = last ? last.id : '—';
+}
+
+// ---------- Contact ----------
+$('#contactForm')?.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  toast('Message sent successfully ✅');
+  e.target.reset();
+});
+
+// ---------- Auth ----------
+$('#loginForm')?.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const form = new FormData(e.target);
+  try{
+    const res = await fetch(`${AUTH_BASE}/login.php`, { method:'POST', body: form });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Login failed'}));
+      toast(err.error || 'Login failed'); return;
+    }
+    await res.json();
+    toast('Logged in ✅');
+    location.href = 'products.html';
+  }catch(err){
+    console.error(err);
+    toast('Network error');
+  }
+});
+
+$('#registerForm')?.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const form = new FormData(e.target);
+  try{
+    const res = await fetch(`${AUTH_BASE}/register.php`, { method:'POST', body: form });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Registration failed'}));
+      toast(err.error || 'Registration failed'); return;
+    }
+    await res.json();
+    toast('Account created ✅');
+    location.href = 'login.html';
+  }catch(err){
+    console.error(err);
+    toast('Network error');
+  }
+});
+
+// ----------(Login/Logout) ----------
+async function updateUserNav(){
+  const slot = document.getElementById('userSlot');
+  if(!slot) return;
+  try{
+    const res  = await fetch(`${AUTH_BASE}/me.php`);
+    const data = await res.json();
+    if(data.authenticated && data.user){
+      slot.innerHTML = `
+        Welcome, <strong>${escapeHtml(data.user.name)}</strong>
+        · <a href="#" id="logoutBtn">Logout</a>
+      `;
+      document.getElementById('logoutBtn')?.addEventListener('click', async (e)=>{
+        e.preventDefault();
+        await fetch(`${AUTH_BASE}/logout.php`);
+        toast('Logged out');
+        location.href = 'index.html';
+      });
+    }else{
+      slot.innerHTML = `<a href="login.html">Login</a> / <a href="register.html">Register</a>`;
+    }
+  }catch{
+    slot.innerHTML = `<a href="login.html">Login</a> / <a href="register.html">Register</a>`;
+  }
+}
+
+// ---------- Highlight current nav ----------
+function highlightNav(){
+  const map = {
+    home:'home',
+    products:'products',
+    cart:'cart',
+    contact:'contact',
+    checkout:'cart',
+    success:'cart'
+  };
+  const page = document.body.dataset.page;
+  const key  = map[page];
+  if(!key) return;
+  document.querySelectorAll('[data-nav]').forEach(a => a.classList.remove('active'));
+  const active = document.querySelector(`[data-nav="${key}"]`);
+  if(active) active.classList.add('active');
+}
+
+// ---------- Single init ----------
+document.addEventListener('DOMContentLoaded', async ()=>{
+  updateCartBadge();
+  await updateUserNav();
+  highlightNav();
+
+  const page = document.body.dataset.page;
+  if(page==='products'){ renderProducts(); }
+  if(page==='cart'){ renderCart(); }
+  if(page==='checkout'){ renderCheckout(); }
+  if(page==='success'){ renderSuccess(); }
+});
